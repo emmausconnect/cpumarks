@@ -1,6 +1,7 @@
 """Implements the sequence to update the CSV marks file"""
 import os
 import sys
+import json
 import time
 import datetime
 from pathlib import Path as plPath
@@ -42,8 +43,8 @@ def update_now(current_marks: str):  # -> dict[str, str]:
 
 if __name__ == "__main__":
     marksfile_ = os.path.realpath(os.sep.join([os.path.dirname(__file__), 'cpumarks.csv']))
-    print(marksfile_)
+    # print(marksfile_)
     ret_ = update_now(marksfile_)
-    print(ret_)
+    print(json.dumps(ret_)) 
     sys.exit(0)
 

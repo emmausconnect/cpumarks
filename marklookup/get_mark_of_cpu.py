@@ -12,7 +12,8 @@ from collections import defaultdict
 
 _OURCPUNAMESANDMARKS = 'our_cpunames_and_marks.json'
 
-_DEFAULTMARKSFILE = 'cpus.csv'
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_DEFAULTMARKSFILE = os.path.join(_SCRIPT_DIR, '..', 'marksdata', 'cpumarks.csv')
 
 _logger = logging.getLogger("get_all_audits")
 _logger.level = logging.WARNING
@@ -234,6 +235,30 @@ class CpuAssessor:
         return stats, missed
 
 
+def get_mark_json(cpu_str: str, marksfile: str = _DEFAULTMARKSFILE) -> str:
+    """Return CPU mark assessment as JSON string"""
+    try:
+        ca = CpuAssessor(marksfile)
+        ma, (meth, nline, line), det = ca.assess(cpu_str)
+        
+        result = {
+            "error": False,
+            "mark": str(ma),
+            "cpustr": cpu_str,
+            "hint": meth.name,
+            "cpuscsv": os.path.basename(marksfile),
+            "linenum": str(nline),
+            "line": str(line),
+            "details": det
+        }
+    except Exception as e:
+        result = {
+            "error": True,
+            "message": str(e)
+        }
+    
+    return json.dumps(result)
+    
 if __name__ == "__main__":
 
     class MyFormatter(argparse.MetavarTypeHelpFormatter, argparse.RawTextHelpFormatter):
@@ -325,6 +350,9 @@ if __name__ == "__main__":
     parser_.add_argument('-n', "--notes-historiques", type=str, required=False, metavar="LMFILE",
                          help="(expert) Fichier JSON de notes calculées autrement", default=_OURCPUNAMESANDMARKS)
 
+    parser_.add_argument("--json", default=False, action='store_true',
+                        help="Retourner le résultat au format JSON")
+
     args_ = parser_.parse_args()
 
     if args_.helpall:
@@ -354,7 +382,21 @@ if __name__ == "__main__":
     if not args_.test:
         # cpu_ = "Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz"
         ma_, (meth_, nline_, line_), det_ = ca_.assess(cpu_)
-        print(f'"{cpu_}" a pour indice: {ma_} ({meth_}, {nline_}, "{line_}")')
+        
+        if '--json' in sys.argv:
+            result = {
+                "error": False,
+                "mark": str(ma_),
+                "cpustr": cpu_,
+                "hint": meth_.name,
+                "cpuscsv": os.path.basename(mfile_),
+                "linenum": str(nline_),
+                "line": str(line_),
+                "details": det_
+            }
+            print(json.dumps(result))
+        else:
+            print(f'"{cpu_}" a pour indice: {ma_} ({meth_}, {nline_}, "{line_}")')
     else:
         lmfile_ = os.path.realpath(args_.notes_historiques)
         if not os.path.isfile(lmfile_) or not os.access(lmfile_, os.R_OK):

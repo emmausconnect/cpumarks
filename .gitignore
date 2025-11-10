@@ -1,5 +1,34 @@
-.idea/
+# Virtual environment
+venv/
+
+# Python cache
 __pycache__/
-inxi*
-lshw*
-*~
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# CSV data files (keep only the symlink, not the timestamped files)
+marksdata/cpumarks-*.csv
+marksdata/*.csv
+!marksdata/cpumarks.csv
+
+# Temporary/intermediate files
+cpumarks-prefetch.json

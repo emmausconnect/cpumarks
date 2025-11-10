@@ -9,7 +9,6 @@ import enum
 import logging
 import json
 import re
-import subprocess
 from http import HTTPStatus
 from typing import Any, Union, Optional
 
@@ -21,16 +20,6 @@ _onLinux = sys.platform.startswith('linux')
 
 _THEPAGE = 'https://www.cpubenchmark.net/CPU_mega_page.html'
 
-
-# if __name__ == "__main__":
-#     installation_ = r"""
-#     ====== Installation (avant la premère utilisation) ======
-#
-#     Ce script requiert les packages Python: 'requests' et 'urllib3'
-#     """
-# else:
-#     installation_ = ""
-
 # Setting test mode
 _IMAX = 0  # value for production version
 # _IMAX = 30  # for testing
@@ -38,7 +27,6 @@ _IMAX = 0  # value for production version
 _logger = logging.getLogger("get_cpu_marks_db")
 _logger.level = logging.WARNING
 _hdlr = logging.StreamHandler()
-# formatter_ = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s')
 _formatter = logging.Formatter('[%(levelname)-7s] %(filename)s(%(lineno)d): %(message)s')
 _hdlr.setFormatter(_formatter)
 _logger.addHandler(_hdlr)
@@ -116,96 +104,198 @@ class CpuMarks:
             _logger.fatal("Don't know this technique to get the data from the web")
 
     @classmethod
+    def _get_the_data_from_json_file(cls, json_file: str) -> None:
+        """Load data from a pre-fetched JSON file"""
+        _logger.info(f"Loading data from JSON file: {json_file}")
+        
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            
+            if not d:
+                _logger.error("No data found in JSON file")
+                return
+            
+            _logger.info(f"Loaded {len(d)} CPU records from JSON")
+            cls._process_cpu_data(d)
+            
+        except FileNotFoundError:
+            _logger.error(f"JSON file not found: {json_file}")
+        except json.JSONDecodeError as exc:
+            _logger.error(f"Failed to parse JSON file: {exc}")
+            
+    @classmethod
     def _get_the_data_from_web_scrap(cls) -> None:
+        """Collects the primary data from the web by accessing one magic page via PHP bridge"""
+        
+        # Priority 1: Check if pre-fetched JSON file exists (for OVH mutualized hosting)
+        prefetch_json = os.getenv('CPU_MARKS_PREFETCH_JSON', 'cpumarks-prefetch.json')
+        if os.path.isfile(prefetch_json):
+            _logger.info(f"Using pre-fetched JSON file: {prefetch_json}")
+            cls._get_the_data_from_json_file(prefetch_json)
+            return
+        
+        # Priority 2: Original direct method (fallback for non-restricted environments)
+        cls._get_the_data_direct()
+    
+    @classmethod
+    def _get_the_data_direct(cls) -> None:
         """Collects the primary data from the web by accessing one magic page"""
-        agent = 'Mozilla/5.0 (X11; Linux x86_64; rv:134.0) Gecko/20100101 Firefox/134.0'
+        agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15'
+        
+        # Complete browser-like headers
+        initial_headers = {
+            'User-Agent': agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+        }
+        
         sessid = ''
 
-        cmd = ["curl", "-sv", f"{_THEPAGE}", "-H", f"User-Agent: {agent}"]
+        # Step 1: Get PHPSESSID from initial request
+        _logger.info(f"Fetching PHPSESSID from {_THEPAGE}")
         try:
-            cp = subprocess.run(cmd, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=7)
-        except subprocess.TimeoutExpired as exc:
-            _logger.error(f"Command {exc.cmd} took too long ({exc.timeout}s)")  # .format(exc.cmd, exc.timeout))
-            _logger.error(exc.output.decode('utf-8').split('\n'))
-        else:
-            if cp.returncode == 0:
-                out = cp.stdout.decode()
-                m = re.match(r'.*PHPSESSID=(?P<sessid>[0-9A-Fa-f]{32});.*', out, re.M | re.S)
-                if not m:
-                    _logger.error("Could not extract a proper PHPSESSID from the request's output")
-                else:
-                    sessid = m.groupdict()['sessid']
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            session = requests.Session()
+            # Set session-wide SSL verification
+            session.verify = False
+            
+            response = session.get(
+                _THEPAGE,
+                headers=initial_headers,
+                timeout=15,
+                allow_redirects=True
+            )
+            
+            if response.status_code != 200:
+                _logger.error(f"Initial request failed with status {response.status_code}")
+                return
+            
+            # Extract PHPSESSID from cookies
+            if 'PHPSESSID' in session.cookies:
+                sessid = session.cookies['PHPSESSID']
+                _logger.info(f"Found PHPSESSID: {sessid}")
             else:
-                _logger.error(f"The request for PHPSESSID returned {cp.returncode}")
+                # Try to extract from Set-Cookie header
+                for cookie in response.cookies:
+                    if cookie.name == 'PHPSESSID':
+                        sessid = cookie.value
+                        _logger.info(f"Extracted PHPSESSID from cookies: {sessid}")
+                        break
+                
+                if not sessid:
+                    _logger.error("Could not extract PHPSESSID from the response")
+                    _logger.debug(f"Response headers: {response.headers}")
+                    _logger.debug(f"Response cookies: {response.cookies}")
+                    return
+                
+        except requests.exceptions.Timeout:
+            _logger.error("Request for PHPSESSID timed out")
+            return
+        except requests.exceptions.RequestException as exc:
+            _logger.error(f"Request for PHPSESSID failed: {exc}")
+            return
 
-        headers = {
+        # Step 2: Fetch the actual data using the session ID
+        ajax_headers = {
+            'User-Agent': agent,
             'Accept': 'application/json, text/javascript, */*; q=0.01',
-            'Accept-Encoding': 'text',
-            'Cookie': f'PHPSESSID={sessid}',
-            'Referer': fr'{_THEPAGE}',
-            'User-Agent': f'{agent}',
-            'X-Requested-With': 'XMLHttpRequest'
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': _THEPAGE,
+            'X-Requested-With': 'XMLHttpRequest',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
         }
+        
         ts = int(time.time() * 1000)
-        url = fr"https://www.cpubenchmark.net/data/?_=${ts}"
+        url = f"https://www.cpubenchmark.net/data/?_={ts}"
+        
+        _logger.info(f"Fetching data from {url}")
+        
+        try:
+            # Wait a bit to simulate human behavior
+            time.sleep(0.5)
+            
+            r = session.get(url, headers=ajax_headers, timeout=30)
+            s = HTTPStatus(r.status_code)
 
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        r = requests.get(url, headers=headers, verify=False, timeout=30)
-        s = HTTPStatus(r.status_code)
+            if s != HTTPStatus.OK:
+                _logger.fatal(f'Request for the marks failed with status "{s.value}: {s.description}"')
+                _logger.debug(f"Response text: {r.text[:500]}")
+                return
+            
+            cls._process_cpu_data(d)
 
-        if s != HTTPStatus.OK:
-            _logger.fatal(f'Request for the marks failed with status "{s.value}: {s.description}"')
-        else:
-            d = json.loads(r.content.decode())['data']
-            jn = 'cpumarks-scrap.json'
-            with open(jn, 'w', encoding='utf-8') as j:
-                json.dump(d, j, sort_keys=True, indent=2)
-            _logger.warning(f'Wrote intermediate JSON file {jn}')
-            cls._d = []
-            for el in d:
-                # In most cases, "cpuCount" is represented as 1: int in the JSON structure; however, when
-                # there are more than 1 CPU, "cpuCount" is represented as a string, e.g., "2"
-                # Since we don't keep track of cpuCount, we need to update the value of "cores"
-                try:
-                    cpucount = int(el['cpuCount'])  # == 1 most of the time
-                    cores = int(el['cores'])
-                    if cpucount > 1:
-                        el['cores'] = str(cores * cpucount)
-                        if cpucount == 2:
-                            el['name'] = '[Dual CPU] ' + el['name']
-                        elif cpucount == 3:
-                            el['name'] = '[3-Way CPU] ' + el['name']
-                        elif cpucount == 4:
-                            el['name'] = '[Quad CPU] ' + el['name']
-                        elif cpucount == 5:
-                            el['name'] = '[5-Way CPU] ' + el['name']
-                        elif cpucount == 8:
-                            el['name'] = '[8-Way CPU] ' + el['name']
-                        elif cpucount == 12:
-                            el['name'] = '[12-Way CPU] ' + el['name']
-                        elif cpucount == 16:
-                            el['name'] = '[16-Way CPU] ' + el['name']
-                    else:
-                        el['cores'] = str(cores + int(el['secondaryCores']))
-                except Exception as exc:  # pylint: disable=W0718
-                    _logger.warning(f'Exception {exc}) was raised while processing {el}')
-                # Filter out the unused keys; keep values as they are
-                toapp = {k: _to_intstr_when_possible(v).strip() for k, v in el.items() if
-                         k in cls._keys_to_keep.values()}
-                toapp['cannonname'] = re.sub(r'^\[[^\[]+]\s*', '', el['name']).strip()
-                if toapp['cannonname'] != el['name']:
-                    pass
-                cls._d.append(toapp)
+            lnames = [_['name'] for _ in cls._d]
+            if len(lnames) != len(set(lnames)):
+                duplicates = {x: lnames.count(x) for x in lnames if lnames.count(x) > 1}
+                _logger.warning(f'Found {len(duplicates)} duplicate names')
+                for _ in duplicates:
+                    _logger.warning(f'{_}: {duplicates[_]} occurrences')
+                    
+        except requests.exceptions.Timeout:
+            _logger.error("Request for data timed out")
+            return
+        except requests.exceptions.RequestException as exc:
+            _logger.error(f"Request for data failed: {exc}")
+            return
+        except (json.JSONDecodeError, KeyError) as exc:
+            _logger.error(f"Failed to parse JSON response: {exc}")
+            _logger.debug(f"Response text: {r.text[:500]}")
+            return
+    
+    @classmethod
+    def _process_cpu_data(cls, d: list) -> None:
+        """Process the raw CPU data from the API"""
+        cls._d = []
+        for el in d:
+            # In most cases, "cpuCount" is represented as 1: int in the JSON structure; however, when
+            # there are more than 1 CPU, "cpuCount" is represented as a string, e.g., "2"
+            # Since we don't keep track of cpuCount, we need to update the value of "cores"
+            try:
+                cpucount = int(el['cpuCount'])  # == 1 most of the time
+                cores = int(el['cores'])
+                if cpucount > 1:
+                    el['cores'] = str(cores * cpucount)
+                    if cpucount == 2:
+                        el['name'] = '[Dual CPU] ' + el['name']
+                    elif cpucount == 3:
+                        el['name'] = '[3-Way CPU] ' + el['name']
+                    elif cpucount == 4:
+                        el['name'] = '[Quad CPU] ' + el['name']
+                    elif cpucount == 5:
+                        el['name'] = '[5-Way CPU] ' + el['name']
+                    elif cpucount == 8:
+                        el['name'] = '[8-Way CPU] ' + el['name']
+                    elif cpucount == 12:
+                        el['name'] = '[12-Way CPU] ' + el['name']
+                    elif cpucount == 16:
+                        el['name'] = '[16-Way CPU] ' + el['name']
+                else:
+                    el['cores'] = str(cores + int(el['secondaryCores']))
+            except Exception as exc:  # pylint: disable=W0718
+                _logger.warning(f'Exception {exc}) was raised while processing {el}')
+            # Filter out the unused keys; keep values as they are
+            toapp = {k: _to_intstr_when_possible(v).strip() for k, v in el.items() if
+                     k in cls._keys_to_keep.values()}
+            toapp['cannonname'] = re.sub(r'^\[[^\[]+]\s*', '', el['name']).strip()
+            if toapp['cannonname'] != el['name']:
+                pass
+            cls._d.append(toapp)
 
-        lnames = [_['name'] for _ in cls._d]
-        if len(lnames) != len(set(lnames)):
-            duplicates = {x: lnames.count(x) for x in lnames if lnames.count(x) > 1}
-            _logger.warning(f'Found {len(duplicates)} duplicate names')
-            for _ in duplicates:
-                _logger.warning(f'{_}: {duplicates[_]} occurrences')
 
-
-# def write_csvfile(data: list[dict[str, str]], csvfile: str, fieldlist: Optional[list[str]] = None) -> None:
 def write_csvfile(data: list, csvfile: str, fieldlist: list = None) -> None:
     """Saves a list of records into a CSV file"""
     if fieldlist:
@@ -236,8 +326,7 @@ if __name__ == "__main__":
 
     class MyFormatter(argparse.MetavarTypeHelpFormatter, argparse.RawTextHelpFormatter):
         """Special formatter of mine"""
-        # argparse.ArgumentDefaultsHelpFormatter,
-        # pass
+        pass
 
 
     epilog_ = fr"""
@@ -286,7 +375,7 @@ Le but de ce script est de récupérer les données d'évaluation des CPUs depui
         _logger.setLevel(logging.DEBUG)
 
     for i_ in sorted(vars(args_).items()):
-        _logger.info(f'{i_[0]:<12}: {i_[1]}')  # .format(i_[0], i_[1]))
+        _logger.info(f'{i_[0]:<12}: {i_[1]}')
 
     ofile_ = ""
     if not args_.output_file:
@@ -304,7 +393,13 @@ Le but de ce script est de récupérer les données d'évaluation des CPUs depui
         if os.path.isdir(odir_) and not os.access(odir_, os.W_OK):
             parser_.exit(16, f'Cannot create output file in {odir_} (directory write-protected)\n')
 
+    # THIS IS WHERE get_the_data_from_web IS CALLED:
+    # When you instantiate CpuMarks(), it calls __init__
+    # __init__ checks if _d is empty and calls _init(tech)
+    # _init calls _get_the_data_from_web(tech)
+    # _get_the_data_from_web calls _get_the_data_from_web_scrap()
     cpumarks_ = CpuMarks()
+    
     print(f'Found {cpumarks_.get_number_of_cpus()} CPUs')
 
     d_ = cpumarks_.get_cpu_list()
@@ -313,27 +408,3 @@ Le but de ce script est de récupérer les données d'évaluation des CPUs depui
     write_csvfile(d_, ofile_, fieldlist=cpumarks_.get_field_list())
 
     sys.exit(0)
-
-# Note for the maintainers:
-#
-# The two methods for retrieving the CPU mark data form the web do not return the same information:
-# the SCRAP method returns much more than the UI method.
-#
-# The common keys are listed below:
-# {'CPU Name': 'name',
-#  'Cores': 'cores',
-#  'CPU Mark': 'cpumark',
-#  'Thread Mark': 'thread',
-#  'Socket': 'socket',
-#  'Category': 'cat',
-#  'TDP (W)': 'tdp'}
-#
-# Since we favor the space-free keys, we take the key names coming from SCRAP as being cannonical.
-#
-# Comparing results from UI against results from SCRAP:
-# $ diff <(cut -d ';' -f1-7 cpumarks-UI.csv | LC_ALL=C sort) <(cut -d ';' -f1-7 cpumarks-SCRAP.csv \
-#     | LC_ALL=C sort) | head
-# $
-#
-# For the record:
-# {kx: kw for kx in x.keys() for kw in w.keys() if x[kx] == w[kw] and x[kx] != 'NA'}

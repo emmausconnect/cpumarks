@@ -235,7 +235,8 @@ class CpuMarks:
                 _logger.fatal(f'Request for the marks failed with status "{s.value}: {s.description}"')
                 _logger.debug(f"Response text: {r.text[:500]}")
                 return
-            
+
+            d = json.loads(r.content.decode())['data']
             cls._process_cpu_data(d)
 
             lnames = [_['name'] for _ in cls._d]

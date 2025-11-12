@@ -238,13 +238,6 @@ class CpuMarks:
 
             d = json.loads(r.content.decode())['data']
             cls._process_cpu_data(d)
-
-            lnames = [_['name'] for _ in cls._d]
-            if len(lnames) != len(set(lnames)):
-                duplicates = {x: lnames.count(x) for x in lnames if lnames.count(x) > 1}
-                _logger.warning(f'Found {len(duplicates)} duplicate names')
-                for _ in duplicates:
-                    _logger.warning(f'{_}: {duplicates[_]} occurrences')
                     
         except requests.exceptions.Timeout:
             _logger.error("Request for data timed out")
@@ -295,6 +288,14 @@ class CpuMarks:
             if toapp['cannonname'] != el['name']:
                 pass
             cls._d.append(toapp)
+
+        # Vérification des doublons
+        lnames = [_['name'] for _ in cls._d]
+        if len(lnames) != len(set(lnames)):
+            duplicates = {x: lnames.count(x) for x in lnames if lnames.count(x) > 1}
+            _logger.warning(f'Found {len(duplicates)} duplicate names')
+            for name in duplicates:
+                _logger.warning(f'{name}: {duplicates[name]} occurrences')
 
 
 def write_csvfile(data: list, csvfile: str, fieldlist: list = None) -> None:

@@ -7,6 +7,12 @@ __pycache__/
 *$py.class
 *.so
 
+# PyCharm IDE
+.idea/
+
+# Editors' backup files
+*~
+
 # Distribution / packaging
 .Python
 build/

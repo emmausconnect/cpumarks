@@ -2,14 +2,14 @@
 import os
 import sys
 import json
-import time
-from pathlib import Path
+# import time
 
 # Import version from __version__.py
 try:
-    from __version__ import __version__
+    from __version__ import __version__, __authors__
 except ImportError:
     __version__ = "unknown"
+    __authors__ = {"unknown": "nomail"}
 
 
 def get_version_info(marksdata_dir: str = None) -> dict:
@@ -24,22 +24,22 @@ def get_version_info(marksdata_dir: str = None) -> dict:
     """
     if marksdata_dir is None:
         marksdata_dir = os.path.join(os.path.dirname(__file__), 'marksdata')
-    
+
     result = {
         "project_version": __version__,
+        "authors": ', '.join([f'{k} <{v}>' for k, v in __authors__.items()]),
         "csv_symlink": None,  # ← NOUVEAU
         "csv_target": None,   # ← NOUVEAU
         "csv_file": None,
         "csv_basename": None,
-        "csv_modified_time": None,
-        "csv_modified_iso": None,
-        "total_cpus": None,
-    }
-    
+        # "csv_modified_time": None,
+        # "csv_modified_iso": None,
+        "total_cpus": None, }
+
     # Find the current CSV file (follow symlink)
     csv_link = os.path.join(marksdata_dir, 'cpumarks.csv')
     result["csv_symlink"] = csv_link  # ← NOUVEAU
-    
+
     if os.path.islink(csv_link):
         # Get the target of the symlink
         csv_target = os.readlink(csv_link)
@@ -53,39 +53,41 @@ def get_version_info(marksdata_dir: str = None) -> dict:
         result["csv_target"] = None  # ← Pas un symlink
     else:
         return result  # No CSV file found
-    
+
     result["csv_file"] = csv_file
-    
+
     # Get modification time
     if os.path.isfile(csv_file):
-        mtime = os.path.getmtime(csv_file)
-        result["csv_modified_time"] = int(mtime)
-        result["csv_modified_iso"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
-        
-        # Count lines (approximate CPU count)
+        # mtime = os.path.getmtime(csv_file)
+        # result["csv_modified_time"] = int(mtime)
+        # result["csv_modified_iso"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+
+        # Count lines (exact CPU count if no duplicates were detected when file was created, broad approximation
+        # otherwise)
         try:
             with open(csv_file, 'r', encoding='utf-8') as f:
                 line_count = sum(1 for _ in f) - 1  # -1 for header
-            result["total_cpus"] = line_count
+            result["total_cpus"] = str(line_count)
         except Exception:
             pass
-    
+
     return result
+
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Get cpumarks project version information')
     parser.add_argument('--marksdata-dir', type=str, help='Path to marksdata directory')
     parser.add_argument('--pretty', action='store_true', help='Pretty print JSON output')
-    
+
     args = parser.parse_args()
-    
+
     info = get_version_info(args.marksdata_dir)
-    
+
     if args.pretty:
         print(json.dumps(info, indent=2))
     else:
         print(json.dumps(info))
-    
+
     sys.exit(0)

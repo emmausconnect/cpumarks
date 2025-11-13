@@ -10,7 +10,7 @@ import logging
 import json
 import re
 from http import HTTPStatus
-from typing import Any, Union, Optional
+from typing import Any, Union  # , Optional
 
 import urllib3
 import requests
@@ -107,42 +107,42 @@ class CpuMarks:
     def _get_the_data_from_json_file(cls, json_file: str) -> None:
         """Load data from a pre-fetched JSON file"""
         _logger.info(f"Loading data from JSON file: {json_file}")
-        
+
         try:
             with open(json_file, 'r', encoding='utf-8') as f:
                 d = json.load(f)
-            
+
             if not d:
                 _logger.error("No data found in JSON file")
                 return
-            
+
             _logger.info(f"Loaded {len(d)} CPU records from JSON")
             cls._process_cpu_data(d)
-            
+
         except FileNotFoundError:
             _logger.error(f"JSON file not found: {json_file}")
         except json.JSONDecodeError as exc:
             _logger.error(f"Failed to parse JSON file: {exc}")
-            
+
     @classmethod
     def _get_the_data_from_web_scrap(cls) -> None:
         """Collects the primary data from the web by accessing one magic page via PHP bridge"""
-        
+
         # Priority 1: Check if pre-fetched JSON file exists (for OVH mutualized hosting)
         prefetch_json = os.getenv('CPU_MARKS_PREFETCH_JSON', 'cpumarks-prefetch.json')
         if os.path.isfile(prefetch_json):
             _logger.info(f"Using pre-fetched JSON file: {prefetch_json}")
             cls._get_the_data_from_json_file(prefetch_json)
             return
-        
+
         # Priority 2: Original direct method (fallback for non-restricted environments)
         cls._get_the_data_direct()
-    
+
     @classmethod
     def _get_the_data_direct(cls) -> None:
         """Collects the primary data from the web by accessing one magic page"""
         agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15'
-        
+
         # Complete browser-like headers
         initial_headers = {
             'User-Agent': agent,
@@ -156,29 +156,29 @@ class CpuMarks:
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
         }
-        
+
         sessid = ''
 
         # Step 1: Get PHPSESSID from initial request
         _logger.info(f"Fetching PHPSESSID from {_THEPAGE}")
         try:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            
+
             session = requests.Session()
             # Set session-wide SSL verification
             session.verify = False
-            
+
             response = session.get(
                 _THEPAGE,
                 headers=initial_headers,
                 timeout=15,
                 allow_redirects=True
             )
-            
+
             if response.status_code != 200:
                 _logger.error(f"Initial request failed with status {response.status_code}")
                 return
-            
+
             # Extract PHPSESSID from cookies
             if 'PHPSESSID' in session.cookies:
                 sessid = session.cookies['PHPSESSID']
@@ -190,13 +190,13 @@ class CpuMarks:
                         sessid = cookie.value
                         _logger.info(f"Extracted PHPSESSID from cookies: {sessid}")
                         break
-                
+
                 if not sessid:
                     _logger.error("Could not extract PHPSESSID from the response")
                     _logger.debug(f"Response headers: {response.headers}")
                     _logger.debug(f"Response cookies: {response.cookies}")
                     return
-                
+
         except requests.exceptions.Timeout:
             _logger.error("Request for PHPSESSID timed out")
             return
@@ -218,16 +218,16 @@ class CpuMarks:
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
         }
-        
+
         ts = int(time.time() * 1000)
         url = f"https://www.cpubenchmark.net/data/?_={ts}"
-        
+
         _logger.info(f"Fetching data from {url}")
-        
+
         try:
             # Wait a bit to simulate human behavior
             time.sleep(0.5)
-            
+
             r = session.get(url, headers=ajax_headers, timeout=30)
             s = HTTPStatus(r.status_code)
 
@@ -238,7 +238,7 @@ class CpuMarks:
 
             d = json.loads(r.content.decode())['data']
             cls._process_cpu_data(d)
-                    
+
         except requests.exceptions.Timeout:
             _logger.error("Request for data timed out")
             return
@@ -247,9 +247,10 @@ class CpuMarks:
             return
         except (json.JSONDecodeError, KeyError) as exc:
             _logger.error(f"Failed to parse JSON response: {exc}")
+            # noinspection PyUnboundLocalVariable
             _logger.debug(f"Response text: {r.text[:500]}")
             return
-    
+
     @classmethod
     def _process_cpu_data(cls, d: list) -> None:
         """Process the raw CPU data from the API"""
@@ -282,8 +283,7 @@ class CpuMarks:
             except Exception as exc:  # pylint: disable=W0718
                 _logger.warning(f'Exception {exc}) was raised while processing {el}')
             # Filter out the unused keys; keep values as they are
-            toapp = {k: _to_intstr_when_possible(v).strip() for k, v in el.items() if
-                     k in cls._keys_to_keep.values()}
+            toapp = {k: _to_intstr_when_possible(v).strip() for k, v in el.items() if k in cls._keys_to_keep.values()}
             toapp['cannonname'] = re.sub(r'^\[[^\[]+]\s*', '', el['name']).strip()
             if toapp['cannonname'] != el['name']:
                 pass
@@ -361,7 +361,7 @@ Le but de ce script est de récupérer les données d'évaluation des CPUs depui
 
     parser_.add_argument("-f", "--force", default=False, action='store_true',
                          help="Forcer la ré-écriture du fichier CSV"
-                         "\nPar défaut, si le fichier existe déjà, le script le signale et s'arrête")
+                              "\nPar défaut, si le fichier existe déjà, le script le signale et s'arrête")
 
     parser_.add_argument("-v", "--verbose", default=False, action='store_true',
                          help="Activer le mode verbeux")
@@ -401,7 +401,7 @@ Le but de ce script est de récupérer les données d'évaluation des CPUs depui
     # _init calls _get_the_data_from_web(tech)
     # _get_the_data_from_web calls _get_the_data_from_web_scrap()
     cpumarks_ = CpuMarks()
-    
+
     print(f'Found {cpumarks_.get_number_of_cpus()} CPUs')
 
     d_ = cpumarks_.get_cpu_list()

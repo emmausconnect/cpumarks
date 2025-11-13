@@ -45,6 +45,5 @@ if __name__ == "__main__":
     marksfile_ = os.path.realpath(os.sep.join([os.path.dirname(__file__), 'cpumarks.csv']))
     # print(marksfile_)
     ret_ = update_now(marksfile_)
-    print(json.dumps(ret_)) 
+    print(json.dumps(ret_))
     sys.exit(0)
-

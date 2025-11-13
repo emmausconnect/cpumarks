@@ -240,7 +240,7 @@ def get_mark_json(cpu_str: str, marksfile: str = _DEFAULTMARKSFILE) -> str:
     try:
         ca = CpuAssessor(marksfile)
         ma, (meth, nline, line), det = ca.assess(cpu_str)
-        
+
         result = {
             "error": False,
             "mark": str(ma),
@@ -256,9 +256,10 @@ def get_mark_json(cpu_str: str, marksfile: str = _DEFAULTMARKSFILE) -> str:
             "error": True,
             "message": str(e)
         }
-    
+
     return json.dumps(result)
-    
+
+
 if __name__ == "__main__":
 
     class MyFormatter(argparse.MetavarTypeHelpFormatter, argparse.RawTextHelpFormatter):
@@ -351,7 +352,7 @@ if __name__ == "__main__":
                          help="(expert) Fichier JSON de notes calculées autrement", default=_OURCPUNAMESANDMARKS)
 
     parser_.add_argument("--json", default=False, action='store_true',
-                        help="Retourner le résultat au format JSON")
+                         help="Retourner le résultat au format JSON")
 
     args_ = parser_.parse_args()
 
@@ -382,10 +383,10 @@ if __name__ == "__main__":
     if not args_.test:
         # cpu_ = "Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz"
         ma_, (meth_, nline_, line_), det_ = ca_.assess(cpu_)
-        
-        if '--json' in sys.argv:
-            result = {
-                "error": False,
+
+        if args_.json:
+            result_ = {
+                "error": True if ma_ == 0 else False,
                 "mark": str(ma_),
                 "cpustr": cpu_,
                 "hint": meth_.name,
@@ -394,7 +395,7 @@ if __name__ == "__main__":
                 "line": str(line_),
                 "details": det_
             }
-            print(json.dumps(result))
+            print(json.dumps(result_))
         else:
             print(f'"{cpu_}" a pour indice: {ma_} ({meth_}, {nline_}, "{line_}")')
     else:

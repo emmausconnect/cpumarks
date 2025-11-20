@@ -10,6 +10,13 @@ import enum
 import math
 from collections import defaultdict
 
+# Import version from __version__.py
+try:
+    from __version__ import __version__
+except ImportError:
+    __version__ = "unknown"
+
+
 _OURCPUNAMESANDMARKS = 'our_cpunames_and_marks.json'
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -46,6 +53,7 @@ class CpuAssessor:
 
     __is_initialized = False
     __marks: dict = {}
+    __names: dict = {}
     __markswithsets: dict = {}
     __marksnoat: dict = {}
 
@@ -77,7 +85,8 @@ class CpuAssessor:
                             m = r['CPUMARK']
                         except KeyError as exc:
                             raise RuntimeError("Unable to guess which column has the mark of the CPU") from exc
-                    CpuAssessor.__marks[nam] = (int(m), line)
+                    CpuAssessor.__marks[nam.lower()] = (int(m), line)
+                    CpuAssessor.__names[line] = nam
                 line += 1
 
         CpuAssessor.__marksnoat = {k.split('@')[0].strip(): v for k, v in CpuAssessor.__marks.items() if '@' in k}
@@ -108,66 +117,65 @@ class CpuAssessor:
 
     @classmethod
     def _nmatch(cls, x: str):  # -> tuple[int, tuple[MatchStep, int, str], list[str]]:
+        x = x.lower()
         det = []
         ret = cls.__marksnoat.get(x, (0, 0))
         if ret[0]:
-            return ret[0], (cls.MatchStep.SIMPLE_0, ret[1], x), det
-        cx = x.replace('(R)', '')
-        cx = cx.replace('(TM)', '')
-        cx = cx.replace(' CPU', '')
-        # cx = cx.replace(' Duo', '')
-        m = re.match(r'.*(?P<keep>(Intel|AMD).*)', cx)  # remove everything before Intel|AMD
+            return ret[0], (cls.MatchStep.SIMPLE_0, ret[1], cls.__names[ret[1]]), det
+        cx = x.replace('(r)', '').replace('(tm)', '').replace(' cpu', '')
+        m = re.match(r'.*(?P<keep>(Intel|AMD).*)', cx, flags=re.I)  # remove everything before Intel|AMD
         if m:
             cx = m.groupdict()['keep']
         cx = cx.split('w/')[0].strip()
         cx = cx.split(',')[0]  # remove everything after and including a ','
         ret = cls.__marks.get(cx, (0, 0))
         if ret[0]:
-            return ret[0], (cls.MatchStep.SIMPLE_1, ret[1], cx), det
-        if cx.startswith('AMD'):
+            return ret[0], (cls.MatchStep.SIMPLE_1, ret[1], cls.__names[ret[1]]), det
+        if cx.startswith('AMD') or cx.startswith('amd'):
             cx = cx.split(' with')[0]  # remove everything after and including a "' with'"
         ret = cls.__marks.get(cx, (0, 0))
         if ret[0]:
-            return ret[0], (cls.MatchStep.SIMPLE_2, ret[1], cx), det
+            return ret[0], (cls.MatchStep.SIMPLE_2, ret[1], cls.__names[ret[1]]), det
         ret = cls.__marksnoat.get(cx, (0, 0))
         if ret[0]:
-            return ret[0], (cls.MatchStep.SIMPLE_3, ret[1], cx), det
+            return ret[0], (cls.MatchStep.SIMPLE_3, ret[1], cls.__names[ret[1]]), det
         # 'Intel Core i5-3380M' is found as 'Intel Core i5-3380M @ 2.90GHz' in cls.__marks
         # ==> we need to tamper with cls.__marks a bit...
         # Idea: try to turn entries with 'Intel...@ x.yzGHz' into two entries with same score while making sure the
         # added entry does not already exist
         # ks= [_ for _ in cls.__marks if _.startswith('Intel') and re.match(r'^(?P<keep>(Intel).*) @ ?\d\.\d\d?GHz', _)]
         # ...add code here...
-        x = x.replace('(R)', '').replace('(TM)', '').replace(' CPU', '')
+        # x = x.replace('(R)', '').replace('(TM)', '').replace(' CPU', '')
+        x = x.replace('(r)', '').replace('(tm)', '').replace(' cpu', '')
         mys = cls._keytoset(x)
         candidates1 = [k for k, v in cls.__markswithsets.items() if v['toks'] <= mys]
         if len(candidates1) == 1:
             ret = cls.__marks.get(candidates1[0], (0, 0))
-            return ret[0], (cls.MatchStep.CLEVER_1, ret[1], candidates1[0]), det
-        threshold2 = 3 if 'AMD' in x else 4
+            return ret[0], (cls.MatchStep.CLEVER_1, ret[1], cls.__names[ret[1]]), det
+        threshold2 = 3 if 'amd' in x else 4
         candidates2 = [k for k, v in cls.__markswithsets.items() if len(mys & v['toks']) >= threshold2]
         if len(candidates2) == 1:
             ret = cls.__marks.get(candidates2[0], (0, 0))
-            return ret[0], (cls.MatchStep.CLEVER_2, ret[1], candidates2[0]), det
+            return ret[0], (cls.MatchStep.CLEVER_2, ret[1], cls.__names[ret[1]]), det
         candidates3 = [_ for _ in candidates2 if cls._keytoset(_) > mys]
         if len(candidates3) == 1:
             ret = cls.__marks.get(candidates3[0], (0, 0))
-            return ret[0], (cls.MatchStep.CLEVER_3_1, ret[1], candidates3[0]), det
+            return ret[0], (cls.MatchStep.CLEVER_3_1, ret[1], cls.__names[ret[1]]), det
         for c in candidates3:
             cs = cls._keytoset(c.split('@')[0].strip())
             if cs == mys:
                 ret = cls.__marks.get(c, (0, 0))
-                return ret[0], (cls.MatchStep.CLEVER_3_2, ret[1], c), det
+                return ret[0], (cls.MatchStep.CLEVER_3_2, ret[1], cls.__names[ret[1]]), det
         # Very special cases:
         # ['Pentium T4500', 'Intel Core2 T7200', 'Pentium E5400', 'Intel Pentium Dual T3200']
         # m = re.match(r'.*(?P<model>[A-Z]\d{1,4}).*', x)
-        m = re.match(r'.*(?P<model>[A-Z]\d{1,4}).*', x)
+        m = re.match(r'.*(?P<model>[A-Za-z]\d{1,4}).*', x)
         if m:
             model = m.groupdict()['model']
             candidates4 = [k for k, v in cls.__markswithsets.items() if model in v['toks']]
             if len(candidates4) == 1:
                 ret = cls.__marks.get(candidates4[0], (0, 0))
-                return ret[0], (cls.MatchStep.DESPERATE_1, ret[1], candidates4[0]), det
+                return ret[0], (cls.MatchStep.DESPERATE_1, ret[1], cls.__names[ret[1]]), det
         else:
             candidates4 = []
 
@@ -192,7 +200,8 @@ class CpuAssessor:
         missed: list = []  # [tuple[str, list[tuple[int, str]]]] = []
         stats: dict = {_.name: 0 for _ in cls.MatchStep}
         failures = []
-        weird_: int = 0
+        weird: int = 0
+        warned: int = 0
         for nam, ourmarks in ournames.items():
             ma, (meth, nline, line), det = cls._nmatch(nam)
             if meth not in [cls.MatchStep.SIMPLE_0, cls.MatchStep.SIMPLE_1]:
@@ -214,7 +223,7 @@ class CpuAssessor:
                 variance_ = sum(sq_diffs_) / len(lmarks_)
                 sd_ = math.sqrt(variance_)
                 if deltapcavg_ <= threshold and not (deltapcmin_ <= threshold and deltapcmax_ <= threshold):
-                    weird_ += 1
+                    weird += 1
                 if deltapcavg_ <= threshold:
                     ncorrect += 1
                 else:
@@ -222,6 +231,7 @@ class CpuAssessor:
                     for o_ in ourmarks:
                         d_[o_[0]].append(o_[1])
                     d_ = dict(d_)
+                    warned += 1
                     _logger.warning(f'"{nam}" has a mark of {ma}'
                                     f'\n  this is a {deltapcavg_:.2f}% gap v/s {avg_} average'
                                     f' (sd = {sd_:.2f} [{100 * sd_ / avg_:.2f}%])'
@@ -232,32 +242,35 @@ class CpuAssessor:
                 nmiss += 1
                 missed.append((nam, [(o[0], o[1]) for o in ourmarks]))
 
-        return stats, missed
+        return stats, missed, warned
 
 
-def get_mark_json(cpu_str: str, marksfile: str = _DEFAULTMARKSFILE) -> str:
-    """Return CPU mark assessment as JSON string"""
-    try:
-        ca = CpuAssessor(marksfile)
-        ma, (meth, nline, line), det = ca.assess(cpu_str)
-
-        result = {
-            "error": False,
-            "mark": str(ma),
-            "cpustr": cpu_str,
-            "hint": meth.name,
-            "cpuscsv": os.path.basename(marksfile),
-            "linenum": str(nline),
-            "line": str(line),
-            "details": det
-        }
-    except Exception as e:
-        result = {
-            "error": True,
-            "message": str(e)
-        }
-
-    return json.dumps(result)
+# ===== unused function =====
+# def get_mark_json(cpu_str: str, marksfile: str = _DEFAULTMARKSFILE) -> str:
+#     """Return CPU mark assessment as JSON string"""
+#     try:
+#         ca = CpuAssessor(marksfile)
+#         ma, (meth, nline, line), det = ca.assess(cpu_str)
+#
+#         result = {
+#             "error": False,
+#             "mark": str(ma),
+#             "cpustr": cpu_str,
+#             "hint": meth.name,
+#             "cpuscsv": os.path.basename(marksfile),
+#             "linenum": str(nline),
+#             "line": str(line),
+#             "details": det,
+#             "version": __version__
+#         }
+#     except Exception as e:
+#         result = {
+#             "error": True,
+#             "message": str(e),
+#             "version": __version__
+#         }
+#
+#     return json.dumps(result)
 
 
 if __name__ == "__main__":
@@ -393,7 +406,8 @@ if __name__ == "__main__":
                 "cpuscsv": os.path.basename(mfile_),
                 "linenum": str(nline_),
                 "line": str(line_),
-                "details": det_
+                "details": det_,
+                "version": __version__
             }
             print(json.dumps(result_))
         else:
@@ -405,8 +419,8 @@ if __name__ == "__main__":
             parser_.exit(2)
 
         threshold_ = args_.seuil
-        stats_, missed_ = ca_.test(lmfile_, threshold_)
-        print(stats_, missed_)
+        stats_, missed_, warned_ = ca_.test(lmfile_, threshold_)
+        print(stats_, missed_, warned_)
 
     sys.exit(0)
 
